@@ -1,0 +1,194 @@
+version: 2
+
+# Tests with severity "warn" report known source issues or things that need a decision
+# (for example a new activity type) without stopping the build.
+# Multi-column and cross-column checks are custom SQL tests in the tests/ folder.
+
+models:
+  - name: int_rejected_deals
+    description: >
+      Deals rejected from the model for data quality reasons, one row per rejected deal id.
+      A deal id with more than one creation event holds two different deals mixed under one
+      id, so it is left out of int_deals and int_deal_stage_changes. Ephemeral: it is not
+      created in the database but inlined into the models that use it. The test
+      assert_no_rejected_deals reports its rows as a warning on every run.
+    config:
+      materialized: ephemeral
+    columns:
+      - name: deal_id
+        description: Id of the rejected deal.
+      - name: rejection_reason
+        description: Why the deal is rejected.
+      - name: creation_events
+        description: Number of creation (add_time) events found for the deal id.
+      - name: first_created_at
+        description: Time of the earliest creation event.
+      - name: last_created_at
+        description: Time of the latest creation event.
+
+  - name: int_lost_reasons
+    description: >
+      The reasons a deal can be lost, one row per reason. Flattened from the JSON option
+      list of the lost_reason field in stg_fields.
+    columns:
+      - name: lost_reason_id
+        description: Id of the lost reason, the value stored in the deal change log.
+        data_tests:
+          - unique
+          - not_null
+      - name: lost_reason
+        description: Label of the lost reason, for example Pricing Issues.
+        data_tests:
+          - not_null
+
+  - name: int_deal_stage_changes
+    description: >
+      Stage history of every deal, one row each time a deal enters a stage. Deals can skip
+      stages, so a deal only has rows for the stages it actually entered. Deals listed in
+      int_rejected_deals are left out.
+    columns:
+      - name: deal_id
+        description: The deal that moved.
+        data_tests:
+          - not_null
+      - name: stage_id
+        description: The stage the deal entered.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+                quote: false
+      - name: stage_name
+        description: >
+          Name of the stage the deal entered, from stg_stages. Empty, and failing the
+          not_null test, for a stage id that is missing from stg_stages.
+        data_tests:
+          - not_null
+      - name: entered_at
+        description: When the deal entered the stage.
+        data_tests:
+          - not_null
+      - name: exited_at
+        description: >
+          When the deal moved on to its next stage. Empty for the deal's latest stage, even
+          if the deal was lost afterwards: to measure time in the final stage, use lost_at
+          from int_deals as the end point.
+      - name: is_first_entry
+        description: >
+          True the first time the deal enters this stage, false on a re-entry. On the current
+          data every row is a first entry, because the only deals with re-entries are the ones
+          rejected in int_rejected_deals.
+        data_tests:
+          - not_null
+
+  - name: int_deals
+    description: >
+      One row per deal with its current state, rebuilt from the deal change log because the
+      source has no deals table. Holds only deals that appear in the change log; deal ids
+      that exist only on activities are not included. Deals listed in int_rejected_deals
+      are left out.
+    columns:
+      - name: deal_id
+        description: Id of the deal.
+        data_tests:
+          - unique
+          - not_null
+      - name: created_at
+        description: When the deal was created (its add_time event).
+        data_tests:
+          - not_null
+      - name: owner_user_id
+        description: The current owner of the deal, matches stg_users.user_id. Earlier owners are not kept.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: user_id
+              config:
+                severity: warn
+      - name: current_stage_id
+        description: The stage the deal entered most recently.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: current_stage_name
+        description: Name of the stage the deal entered most recently.
+      - name: current_stage_entered_at
+        description: When the deal entered its current stage.
+      - name: is_lost
+        description: Whether the deal was marked as lost.
+      - name: lost_at
+        description: When the deal was marked as lost.
+      - name: lost_reason_id
+        description: Id of the lost reason.
+      - name: lost_reason
+        description: Label of the lost reason, for example Pricing Issues.
+
+  - name: int_activities
+    description: >
+      Activities scheduled against deals, one row per activity, with the details of the
+      activity type. Every activity is kept, whether or not its deal exists in int_deals.
+    columns:
+      - name: activity_key
+        description: Generated unique key, because activity_id is shared by unrelated activities.
+        data_tests:
+          - unique
+          - not_null
+      - name: activity_id
+        description: Pipedrive activity id (not unique).
+        data_tests:
+          - unique:
+              config:
+                severity: warn
+      - name: deal_id
+        description: The deal the activity belongs to. Never empty.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_deals')
+                field: deal_id
+              config:
+                severity: warn
+      - name: has_deal_history
+        description: >
+          Whether the deal id exists in int_deals. False for almost all activities: only 8 of
+          4,572 activity deal ids appear in the deal change log.
+      - name: activity_type
+        description: Key of the activity type, for example meeting or sc_2.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['meeting', 'sc_2', 'follow_up', 'after_close_call']
+              config:
+                severity: warn
+      - name: activity_type_name
+        description: Display name of the activity type, for example Sales Call 1.
+        data_tests:
+          - not_null
+      - name: is_activity_type_active
+        description: Whether the activity type is still in use, converted from Yes/No to true/false.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: assigned_user_id
+        description: The user the activity is assigned to, matches stg_users.user_id.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_users')
+                field: user_id
+              config:
+                severity: warn
+      - name: is_done
+        description: Whether the activity was completed.
+        data_tests:
+          - not_null
+      - name: due_at
+        description: When the activity is or was due.
+        data_tests:
+          - not_null

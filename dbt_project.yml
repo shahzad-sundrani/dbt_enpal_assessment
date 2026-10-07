@@ -26,11 +26,26 @@ clean-targets:         # directories to be removed by `dbt clean`
 # Configuring models
 # Full documentation: https://docs.getdbt.com/docs/configuring-models
 
-# In this example config, we tell dbt to build all models in the example/
-# directory as views. These settings can be overridden in the individual model
-# files using the `{{ config(...) }}` macro.
+# Each layer has its own folder, schema and default materialization.
+# Schemas are prefixed with the target schema, for example public_pipedrive_staging.
 models:
   enpal_assessment_project:
-    # Config indicated by + and applies to all files under models/example/
-    +schema: pipedrive_analytics
+    # Default for all models: tables in the public_pipedrive_marts schema
+    +schema: pipedrive_marts
     +materialized: table
+    # Staging models mirror the sources, so they are views in their own schema
+    staging:
+      +schema: pipedrive_staging
+      +materialized: view
+    # Intermediate models hold the reshaping and business logic, also as views
+    intermediate:
+      +schema: pipedrive_intermediate
+      +materialized: view
+    # Marts are the star schema that reports and BI tools query, built as tables
+    marts:
+      +schema: pipedrive_marts
+      +materialized: table
+    # Reporting models answer one specific request and read only from the marts
+    reporting:
+      +schema: pipedrive_reporting
+      +materialized: table

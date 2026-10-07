@@ -2,7 +2,65 @@ version: 2
 
 sources:
   - name: postgres_public
+    description: Raw Pipedrive CRM data loaded into the local Postgres database.
     database: postgres
     schema: public
     tables:
+      - name: deal_changes
+        description: >
+          The history of every deal (a sales opportunity with a potential customer).
+          There is no deals table, so this log is the only record of deals.
+        columns:
+          - name: deal_id
+          - name: change_time
+          - name: changed_field_key
+            description: The field that changed (add_time, stage_id, user_id or lost_reason).
+          - name: new_value
+            description: The new value of the field, stored as text.
+
       - name: activity
+        description: Tasks that sales reps schedule against a deal, such as calls and meetings.
+        columns:
+          - name: activity_id
+            description: Not unique, 11 ids are shared by two different activities.
+          - name: type
+            description: The kind of activity, matches activity_types.type.
+          - name: assigned_to_user
+          - name: deal_id
+          - name: done
+          - name: due_to
+
+      - name: activity_types
+        description: The kinds of activity that exist, and whether each is still in use.
+        columns:
+          - name: id
+          - name: name
+          - name: active
+          - name: type
+
+      - name: stages
+        description: >
+          The steps of the sales pipeline, from Lead Generation (1) to Renewal/Expansion (9).
+          These are funnel steps 1-9 in the report.
+        columns:
+          - name: stage_id
+          - name: stage_name
+
+      - name: fields
+        description: >
+          Definitions of the deal fields that can change, plus the allowed options
+          for dropdown fields.
+        columns:
+          - name: id
+          - name: field_key
+          - name: name
+          - name: field_value_options
+            description: JSON list of options for dropdown fields (stage, lost reason).
+
+      - name: users
+        description: The Pipedrive users, sales reps who own deals and are assigned activities.
+        columns:
+          - name: id
+          - name: name
+          - name: email
+          - name: modified

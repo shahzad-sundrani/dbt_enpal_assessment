@@ -1,0 +1,37 @@
+version: 2
+
+# Reporting models answer one specific request. They read only from the marts.
+
+models:
+  - name: rep_sales_funnel_monthly
+    description: >
+      Monthly sales funnel: how many deals entered each funnel step in each month. One row
+      per month and funnel step (grain: month and funnel_step), for every month between the
+      first and the last funnel event. A step that no deal entered in a month has a
+      deals_count of 0. Steps 1 to 9 count the deals that entered a pipeline stage for the
+      first time. Steps 2.1 and 3.1 count the deals with a completed sales call. The stage
+      steps and the sales call steps come from two unrelated sets of deals, so they should
+      not be compared with each other.
+    columns:
+      - name: month
+        description: First day of the month.
+        data_tests:
+          - not_null
+      - name: kpi_name
+        description: Name of the funnel step, from dim_funnel_steps.
+        data_tests:
+          - not_null
+      - name: funnel_step
+        description: Label of the funnel step, for example Step 1 or Step 2.1.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_funnel_steps')
+                field: funnel_step
+      - name: deals_count
+        description: >
+          Number of distinct deals that entered the funnel step in the month. For sales
+          call steps the month is the due month of the completed call.
+        data_tests:
+          - not_null
