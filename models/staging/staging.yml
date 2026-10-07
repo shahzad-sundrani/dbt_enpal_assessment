@@ -1,0 +1,80 @@
+version: 2
+
+models:
+  - name: stg_deal_changes
+    description: >
+      The history of every deal, one row per field change on a deal. Same rows as the
+      source table deal_changes, with columns renamed.
+    columns:
+      - name: deal_id
+        description: The deal that changed.
+      - name: changed_field_key
+        description: The field that changed (add_time, stage_id, user_id or lost_reason).
+      - name: new_value
+        description: >
+          The new value of the field, stored as text. Its meaning depends on changed_field_key:
+          a timestamp, a stage id, a user id or a lost reason id.
+      - name: changed_at
+        description: When the change happened.
+
+  - name: stg_activity
+    description: >
+      Tasks that sales reps schedule against a deal, one row per activity. Same rows as
+      the source table activity, with columns renamed.
+    columns:
+      - name: activity_id
+        description: Pipedrive activity id. Not unique, 11 ids are shared by two different activities.
+      - name: deal_id
+        description: The deal the activity belongs to.
+      - name: activity_type
+        description: The kind of activity, matches stg_activity_types.activity_type.
+      - name: assigned_user_id
+        description: The user the activity is assigned to, matches stg_users.user_id.
+      - name: is_done
+        description: Whether the activity was completed.
+      - name: due_at
+        description: When the activity is or was due.
+
+  - name: stg_activity_types
+    description: The kinds of activity that exist, one row per activity type.
+    columns:
+      - name: activity_type_id
+        description: Id of the activity type.
+      - name: activity_type
+        description: Key of the activity type as used on activities, for example meeting or sc_2.
+      - name: activity_type_name
+        description: Display name, for example Sales Call 1.
+      - name: is_active
+        description: Whether the type is still in use, as the text Yes or No from the source.
+
+  - name: stg_stages
+    description: The steps of the sales pipeline, one row per stage (1 to 9).
+    columns:
+      - name: stage_id
+        description: Id of the stage, 1 (Lead Generation) to 9 (Renewal/Expansion).
+      - name: stage_name
+        description: Name of the stage.
+
+  - name: stg_fields
+    description: Definitions of the deal fields that can change, one row per field.
+    columns:
+      - name: field_id
+        description: Id of the field.
+      - name: field_key
+        description: Key of the field, matches stg_deal_changes.changed_field_key.
+      - name: field_name
+        description: Display name of the field.
+      - name: field_value_options
+        description: JSON list of options for dropdown fields (stage, lost reason). Empty for other fields.
+
+  - name: stg_users
+    description: The Pipedrive users, one row per user. Contains personal data (name, email).
+    columns:
+      - name: user_id
+        description: Id of the user.
+      - name: user_name
+        description: Full name of the user.
+      - name: user_email
+        description: Email address. Not unique, four addresses are shared by two users each.
+      - name: modified_at
+        description: When the user record was last changed.

@@ -1,0 +1,242 @@
+version: 2
+
+# The marts are a star schema: facts hold keys and measures, dimensions hold the details.
+# No fact joins a dimension; reports combine them.
+
+models:
+  - name: dim_deals
+    description: >
+      One row per deal: its current state and how far it got in the funnel. Holds only deals
+      that appear in the deal change log, without the deals rejected for data quality
+      reasons. Carries the owner's id and name; other user details are in dim_users.
+    columns:
+      - name: deal_id
+        description: Id of the deal. Key of the table.
+        data_tests:
+          - unique
+          - not_null
+      - name: created_at
+        description: When the deal was created.
+      - name: owner_user_id
+        description: The current owner of the deal, joins to dim_users.user_id.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_users')
+                field: user_id
+              config:
+                severity: warn
+      - name: owner_name
+        description: >
+          Name of the current owner, copied from the users so that the most common question
+          about a deal needs no extra join.
+      - name: current_stage_id
+        description: The stage the deal entered most recently.
+      - name: current_stage_name
+        description: Name of the stage the deal entered most recently.
+      - name: current_stage_entered_at
+        description: When the deal entered its current stage.
+      - name: furthest_stage_id
+        description: The highest stage the deal ever entered.
+      - name: stages_entered
+        description: How many different stages the deal entered. Deals can skip stages.
+      - name: is_lost
+        description: Whether the deal was marked as lost.
+      - name: lost_at
+        description: When the deal was marked as lost.
+      - name: lost_reason_id
+        description: Id of the lost reason.
+      - name: lost_reason
+        description: Label of the lost reason, for example Pricing Issues.
+      - name: days_from_creation_to_lost
+        description: Whole days between the creation of the deal and it being lost. Empty for deals that are not lost.
+
+  - name: dim_users
+    description: >
+      One row per Pipedrive user, with the name only. Serves two roles: the owner of a deal
+      (dim_deals.owner_user_id) and the user an activity is assigned to
+      (fct_activities.assigned_user_id). Email addresses are left out on purpose.
+    columns:
+      - name: user_id
+        description: Id of the user. Key of the table.
+        data_tests:
+          - unique
+          - not_null
+      - name: user_name
+        description: Full name of the user.
+
+  - name: dim_date
+    description: >
+      Calendar with one row per day for a fixed range, 2023-12-01 to 2026-03-31, generated
+      without reading any table. The range runs from one month before the earliest date in
+      the data to one year after the latest.
+      Facts join to it on their date column, and reports roll up to week, month, quarter
+      or year from here.
+    columns:
+      - name: date_day
+        description: The day. Key of the table.
+        data_tests:
+          - unique
+          - not_null
+      - name: week_start
+        description: Monday of the week the day belongs to.
+      - name: month_start
+        description: First day of the month the day belongs to.
+      - name: year_month
+        description: Year and month as text, for example 2024-01.
+      - name: year
+        description: Calendar year.
+      - name: quarter
+        description: Calendar quarter, 1 to 4.
+      - name: month_number
+        description: Month of the year, 1 to 12.
+      - name: month_name
+        description: Name of the month, for example January.
+      - name: day_name
+        description: Name of the weekday, for example Monday.
+      - name: is_weekend
+        description: True for Saturday and Sunday.
+
+  - name: dim_funnel_steps
+    description: >
+      The definition of the sales funnel, one row per funnel step. Steps 1 to 9 come from
+      the pipeline stages, so a new stage becomes a step automatically. Steps 2.1 and 3.1
+      are the two sales calls; their position in the funnel exists in no source table and
+      is set in this model. Reports join the facts to it on stage_id or activity_type.
+    columns:
+      - name: funnel_step
+        description: Label of the step, for example Step 1 or Step 2.1. Key of the table.
+        data_tests:
+          - unique
+          - not_null
+      - name: kpi_name
+        description: >
+          Name of the step: the stage name for stage steps, the activity type name for
+          sales call steps.
+        data_tests:
+          - not_null
+      - name: step_order
+        description: >
+          Position of the step in the funnel as a number (1, 2, 2.1, 3 and so on). Use it
+          for sorting, because the text label sorts Step 10 before Step 2.
+        data_tests:
+          - unique
+          - not_null
+      - name: step_source
+        description: Whether the step is fed by a pipeline stage or by an activity.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['stage', 'activity']
+      - name: stage_id
+        description: >
+          The stage that feeds the step, joins to fct_deal_stage_events.stage_id.
+          Empty for sales call steps.
+      - name: activity_type
+        description: >
+          The activity type that feeds the step, joins to fct_activities.activity_type.
+          Empty for stage steps.
+
+  - name: fct_deal_stage_events
+    description: >
+      One row each time a deal enters a stage (grain: deal, stage and entry time).
+      Source of funnel steps 1 to 9. Deals can skip stages, so a deal only has rows for the
+      stages it actually entered.
+    columns:
+      - name: deal_id
+        description: The deal that moved, joins to dim_deals.deal_id.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_deals')
+                field: deal_id
+      - name: stage_id
+        description: The stage the deal entered.
+        data_tests:
+          - not_null
+      - name: stage_name
+        description: Name of the stage the deal entered.
+        data_tests:
+          - not_null
+      - name: entered_date
+        description: The day the deal entered the stage, joins to dim_date.date_day.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: entered_at
+        description: The exact time the deal entered the stage.
+        data_tests:
+          - not_null
+      - name: exited_at
+        description: When the deal moved on to its next stage. Empty for the deal's latest stage.
+      - name: days_in_stage
+        description: >
+          Whole days the deal spent in the stage. For the deal's latest stage the end point is
+          the time the deal was lost; empty if the deal is still open.
+      - name: is_first_entry
+        description: >
+          True the first time the deal enters this stage, false on a re-entry. On the current
+          data every row is a first entry.
+        data_tests:
+          - not_null
+      - name: is_current_stage
+        description: True for the stage the deal entered most recently.
+        data_tests:
+          - not_null
+
+  - name: fct_activities
+    description: >
+      One row per activity scheduled against a deal. Source of funnel steps 2.1
+      (Sales Call 1) and 3.1 (Sales Call 2). Do not rely on a join to dim_deals: only 8 of
+      4,572 activity deal ids exist there (see has_deal_history).
+    columns:
+      - name: activity_key
+        description: Generated unique key of the activity. Key of the table.
+        data_tests:
+          - unique
+          - not_null
+      - name: activity_id
+        description: Pipedrive activity id. Not unique, 11 ids are shared by two different activities.
+      - name: deal_id
+        description: The deal the activity belongs to. Never empty, but rarely present in dim_deals.
+        data_tests:
+          - not_null
+      - name: has_deal_history
+        description: Whether the deal id exists in dim_deals.
+      - name: activity_type
+        description: Key of the activity type, for example meeting or sc_2.
+        data_tests:
+          - not_null
+      - name: activity_type_name
+        description: Display name of the activity type, for example Sales Call 1.
+      - name: is_activity_type_active
+        description: Whether the activity type is still in use.
+      - name: assigned_user_id
+        description: The user the activity is assigned to, joins to dim_users.user_id.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_users')
+                field: user_id
+              config:
+                severity: warn
+      - name: is_done
+        description: Whether the activity was completed.
+        data_tests:
+          - not_null
+      - name: due_date
+        description: >
+          The day the activity is or was due, joins to dim_date.date_day. The source has no
+          completion date, so this is also the best available date for a completed activity.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: due_at
+        description: The exact time the activity is or was due.
